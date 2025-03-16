@@ -1,4 +1,5 @@
 .cache/
+*.o
 *.so
 vgcore.*
 compile_commands.json

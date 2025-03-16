@@ -1,14 +1,15 @@
 BasedOnStyle: WebKit
 PointerAlignment: Right
-SortIncludes: true
+SortIncludes: false
 AllowShortBlocksOnASingleLine: Never
 AllowShortFunctionsOnASingleLine: None
 AllowShortCaseLabelsOnASingleLine: false
-AllowShortIfStatementsOnASingleLine: true
+AllowShortIfStatementsOnASingleLine: Never
 AllowShortLambdasOnASingleLine: None
 AllowShortLoopsOnASingleLine: false
 
 Language: Cpp
+ColumnLimit:     80
 ConstructorInitializerAllOnOneLineOrOnePerLine: true
 IndentCaseLabels: true
 IndentPPDirectives: BeforeHash
