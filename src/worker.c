@@ -1,6 +1,7 @@
 #include "worker.h"
 #include <dlfcn.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #define COORD_ADDR "localhost"
 #define COORD_PORT "4242"
@@ -100,10 +101,10 @@ int main(const int argc, char *const argv[])
         .coord_port = COORD_PORT,
     };
 
-    if (parse_arg(argc, argv, &worker) == 84
-        || load_mr_plugs(worker.plug_path, &worker) == 84)
-        return 84;
+    if (parse_arg(argc, argv, &worker) == FAILURE
+        || load_mr_plugs(worker.plug_path, &worker) == FAILURE)
+        return FAILURE;
     connect_to_coord(worker);
     dlclose(worker.plug_handle);
-    return 0;
+    return SUCCESS;
 }
