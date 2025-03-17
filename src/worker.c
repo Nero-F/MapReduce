@@ -1,5 +1,5 @@
+#include "common.h"
 #include "worker.h"
-#include <dlfcn.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -51,7 +51,7 @@ static int end_coord(worker_t worker, int sockfd, struct addrinfo *coord_info,
     char *err_msg, int ret_val)
 {
     if (err_msg != NULL) perror(err_msg);
-    dlclose(worker.plug_handle);
+    if (worker.plug_handle) dlclose(worker.plug_handle);
     if (sockfd != -1) close(sockfd);
     if (coord_info != NULL) freeaddrinfo(coord_info);
     return ret_val;
@@ -105,6 +105,5 @@ int main(const int argc, char *const argv[])
         || load_mr_plugs(worker.plug_path, &worker) == FAILURE)
         return FAILURE;
     connect_to_coord(worker);
-    dlclose(worker.plug_handle);
     return SUCCESS;
 }

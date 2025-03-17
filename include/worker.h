@@ -1,9 +1,6 @@
 #ifndef WORKER_H_
 #define WORKER_H_
 
-#define FAILURE 84
-#define SUCCESS 0
-
 #include <assert.h>
 #include <stddef.h>
 #include <dlfcn.h>
