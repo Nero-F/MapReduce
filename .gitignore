@@ -3,3 +3,5 @@
 *.so
 vgcore.*
 compile_commands.json
+coordinator
+worker
