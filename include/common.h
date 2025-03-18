@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 #define FAILURE 84
 #define SUCCESS 0
 
@@ -19,3 +21,17 @@
 
 #define foreach(type, item, da)                                                \
     for (type *item = (da)->items; item < (da)->items + (da)->count; item++)
+
+typedef struct files_s {
+    size_t count;
+    size_t capacity;
+    char **items;
+} files_t;
+
+#define ATOI_ARG(c, v, arg)                                                    \
+    do {                                                                       \
+        if ((c = atoi(v)) == 0) {                                              \
+            fprintf(stderr, "arg '%s' %s must be an integer\n", arg, v);       \
+            return FAILURE;                                                    \
+        }                                                                      \
+    } while (0)
