@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stddef.h>
+#include <sys/types.h>
 
 #define FAILURE 84
 #define SUCCESS 0
