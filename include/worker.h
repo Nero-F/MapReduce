@@ -12,6 +12,9 @@
 #include <sys/socket.h>
 #include <netdb.h>
 
+#define DEFAULT_COORD_ADDR "localhost"
+#define DEFAULT_COORD_PORT "4269"
+
 #define PLUGS_MR_LIST                                                          \
     PLUG(map, int, const char *, const char *)                                 \
     PLUG(reduce, int, int, const char *, const char *)
@@ -29,6 +32,11 @@ typedef struct worker_s {
 
     map_t *map;
     reduce_t *reduce;
+
+    int sockfd;
+
+    int n_reduce;
+    struct addrinfo *coord_info;
 } worker_t;
 
 int load_mr_plugs(const char *, worker_t *);

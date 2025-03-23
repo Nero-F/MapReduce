@@ -1,16 +1,18 @@
 #include "common.h"
 #include "worker.h"
+#include "frpc.h"
+#include <bits/getopt_core.h>
+#include <netdb.h>
 #include <stdlib.h>
 #include <stdio.h>
-
-#define COORD_ADDR "localhost"
-#define COORD_PORT "4242"
 
 static void display_help(void)
 {
     printf("Usage: worker [options(s)]\n");
-    printf("\t-H, --host\thost address of the coordinator\n");
-    printf("\t-P, --port\thost port of the coordinator\n");
+    printf("\t-H, --host\thost address of the coordinator, (default: %s)\n",
+        DEFAULT_COORD_ADDR);
+    printf("\t-P, --port\thost port of the coordinator, (default: %s)\n",
+        DEFAULT_COORD_PORT);
     printf("\t-p, --plugin\tpath of the plugin that need to be executed\n");
     printf("\t-h, --help\tdisplay this help list\n");
 }
@@ -47,63 +49,119 @@ static int parse_arg(const int ac, char *const av[], worker_t *worker)
     return SUCCESS;
 }
 
-static int end_coord(worker_t worker, int sockfd, struct addrinfo *coord_info,
-    char *err_msg, int ret_val)
+static int end_coord(worker_t *worker, char *err_msg)
 {
     if (err_msg != NULL) perror(err_msg);
-    if (worker.plug_handle) dlclose(worker.plug_handle);
-    if (sockfd != -1) close(sockfd);
-    if (coord_info != NULL) freeaddrinfo(coord_info);
-    return ret_val;
+    if (worker->plug_handle) dlclose(worker->plug_handle);
+    if (worker->sockfd != -1) close(worker->sockfd);
+    if (worker->coord_info != NULL) freeaddrinfo(worker->coord_info);
+    return FAILURE;
 }
 
-int connect_to_coord(worker_t worker)
+#define RETRY_CALL(err_msg)                                                    \
+    do {                                                                       \
+        if (try_nbr < retry) {                                                 \
+            try_nbr++;                                                         \
+            goto try_call;                                                     \
+        } else {                                                               \
+            perror(err_msg);                                                   \
+            return FAILURE;                                                    \
+        }                                                                      \
+    } while (0)
+
+int call(opcode_t op, worker_t *worker, response_t *resp, uint retry)
+{
+    static size_t id = 0;
+    int sockfd = worker->sockfd;
+    struct addrinfo *coord_info = worker->coord_info;
+    uint try_nbr = 0;
+
+    request_t req = {
+        .ack = ACK,
+        .id = id++,
+        .op = op,
+    };
+
+try_call:
+    if (sendto(sockfd, &req, sizeof(request_t), 0, coord_info->ai_addr,
+            coord_info->ai_addrlen)
+        == -1)
+        RETRY_CALL("sendto");
+
+    if (recvfrom(sockfd, resp, sizeof(response_t), 0, coord_info->ai_addr,
+            &coord_info->ai_addrlen)
+        == -1)
+        RETRY_CALL("recvfrom");
+
+    return SUCCESS;
+}
+
+#define CALL(op, worker, resp, try_nbr)                                        \
+    do {                                                                       \
+        if (call(op, worker, resp, 0) == FAILURE) {                            \
+            fprintf(stderr, "could not contact coordinator\n");                \
+            return FAILURE;                                                    \
+        }                                                                      \
+    } while (0)
+
+int work(worker_t *worker)
+{
+    response_t resp = { 0 };
+
+    CALL(REQ_NREDUCE, worker, &resp, 2);
+    worker->n_reduce = resp.data.nrduce;
+
+    return SUCCESS;
+}
+
+static int connect_to_coord(worker_t *worker)
 {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     int ret_gai = 0;
     struct sockaddr_in sockaddr = { 0 };
 
     struct addrinfo *coord_info = { 0 };
+
     struct addrinfo hints = { 0 };
     hints.ai_family = AF_INET; // TBD: maybe change for AF_UNSPEC
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE; // whildcard IP address
     hints.ai_protocol = IPPROTO_TCP;
 
-    if (sockfd == -1)
-        return end_coord(worker, sockfd, coord_info, "socket", FAILURE);
+    if (sockfd == -1) return end_coord(worker, "socket");
+    worker->sockfd = sockfd;
     if (bind(sockfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) == -1)
-        return end_coord(worker, sockfd, coord_info, "bind", FAILURE);
+        return end_coord(worker, "bind");
 
     ret_gai = getaddrinfo(
-        worker.coord_addr, worker.coord_port, &hints, &coord_info);
+        worker->coord_addr, worker->coord_port, &hints, &coord_info);
 
     if (ret_gai != 0) {
         fprintf(stderr, "[ERROR]: %s\n", gai_strerror(ret_gai));
-        return end_coord(worker, sockfd, coord_info, NULL, FAILURE);
+        return end_coord(worker, NULL);
     }
+    worker->coord_info = coord_info;
     if (connect(sockfd, coord_info->ai_addr, coord_info->ai_addrlen) == -1)
-        return end_coord(worker, sockfd, coord_info, "connect", FAILURE);
+        return end_coord(worker, "connect");
 
     // TODO: Periodically ask for work
-    while (1) {
-        sleep(3);
-    }
 
-    return end_coord(worker, sockfd, coord_info, NULL, SUCCESS);
+    return SUCCESS;
 }
 
 int main(const int argc, char *const argv[])
 {
     worker_t worker = {
         .plug_path = "./plug.so",
-        .coord_addr = COORD_ADDR,
-        .coord_port = COORD_PORT,
+        .coord_addr = DEFAULT_COORD_ADDR,
+        .coord_port = DEFAULT_COORD_PORT,
     };
 
     if (parse_arg(argc, argv, &worker) == FAILURE
-        || load_mr_plugs(worker.plug_path, &worker) == FAILURE)
+        || load_mr_plugs(worker.plug_path, &worker) == FAILURE
+        || connect_to_coord(&worker) == FAILURE)
         return FAILURE;
-    connect_to_coord(worker);
+    work(&worker);
+    end_coord(&worker, NULL);
     return SUCCESS;
 }

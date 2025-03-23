@@ -16,15 +16,26 @@ typedef struct request_s {
     opcode_t op;
     byte ack;
     byte id;
-} request_t;
+} __attribute__((packed)) request_t;
+
+typedef struct work_s {
+    task_type_t type;
+    char *split;
+    int id;
+} work_t;
+
+typedef union inner_data {
+    int nrduce;
+    work_t task_work;
+} inner_data_u;
 
 typedef struct response_s {
+    inner_data_u data;
     opcode_t op;
-    void *data;
     byte ack;
     byte id;
-} response_t;
+} __attribute__((packed)) response_t;
 
-response_t process_req(request_t, coordinator_t *);
+int process_req(int, request_t, coordinator_t *);
 
 #endif /* _F_RPC_H_ */

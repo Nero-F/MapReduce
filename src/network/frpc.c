@@ -13,12 +13,15 @@ response_t ask_work(request_t __attribute__((unused)) req,
 response_t ask_nreduce(request_t req, coordinator_t *coord)
 {
     printf("requesting nreduce...\n");
-    return (response_t) {
+    response_t resp = {
         .ack = ACK,
         .id = req.id,
         .op = req.op,
-        .data = (void *)&coord->n_reduce,
+        .data = (inner_data_u) {
+            .nrduce = coord->n_reduce,
+        },
     };
+    return resp;
 }
 
 response_t (*fptr_tbl[])(request_t req, coordinator_t *coord) = {
@@ -27,7 +30,12 @@ response_t (*fptr_tbl[])(request_t req, coordinator_t *coord) = {
     NULL,
 };
 
-response_t process_req(request_t req, coordinator_t *coord)
+int process_req(int cli_fd, request_t req, coordinator_t *coord)
 {
-    return fptr_tbl[req.op](req, coord);
+    response_t resp = fptr_tbl[req.op](req, coord);
+    if (send(cli_fd, &resp, sizeof(response_t), 0) == -1) {
+        perror("send");
+        return FAILURE;
+    }
+    return SUCCESS;
 }
