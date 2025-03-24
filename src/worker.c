@@ -1,5 +1,7 @@
 #include "common.h"
 #include "worker.h"
+#include "coordinator.h"
+#include <sys/stat.h>
 #include "frpc.h"
 #include <bits/getopt_core.h>
 #include <netdb.h>
@@ -104,6 +106,44 @@ try_call:
         }                                                                      \
     } while (0)
 
+bool _map(const uint id, const char *filename, map_t *emit)
+{
+    int fd = open(filename, O_RDONLY);
+    struct stat statbuf = { 0 };
+    int file_size = 0;
+    char *buffer = NULL;
+
+    if (fd == -1) {
+        perror("fopen");
+        return false;
+    }
+    if (fstat(fd, &statbuf) == -1) {
+        close(fd);
+        perror("fopen");
+        return false;
+    }
+    file_size = statbuf.st_size;
+    buffer = malloc(sizeof(char) * (file_size + 1));
+    if (buffer == NULL) {
+        close(fd);
+        return false;
+    }
+
+    buffer[file_size] = '\0';
+    read(fd, buffer, file_size);
+
+    emit(filename, buffer);
+
+    free(buffer);
+    close(fd);
+    return true;
+}
+
+void do_task(work_t task_work, worker_t *worker)
+{
+    if (task_work.type == MAP) _map(task_work.id, task_work.split, worker->map);
+}
+
 int work(worker_t *worker)
 {
     response_t resp = { 0 };
@@ -111,6 +151,12 @@ int work(worker_t *worker)
     CALL(REQ_NREDUCE, worker, &resp, 2);
     worker->n_reduce = resp.data.nrduce;
 
+    while (1) {
+        CALL(REQ_WORK, worker, &resp, 0);
+        if (resp.data.task_work.type != NONE) break;
+        sleep(30);
+    }
+    do_task(resp.data.task_work, worker);
     return SUCCESS;
 }
 

@@ -30,7 +30,7 @@ bool list_del_elem_at_front(llist_t *front_ptr);
 bool list_del_elem_at_back(llist_t *front_ptr);
 bool list_del_elem_at_position(llist_t *front_ptr, unsigned int position);
 
-void list_clear(llist_t *front_ptr);
+void list_clear(llist_t *front_ptr, bool is_value_allocated);
 
 void *list_get_elem_at_front(llist_t list);
 void *list_get_elem_at_back(llist_t list);

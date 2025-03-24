@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/cdefs.h>
 #include <sys/epoll.h>
 
 void cleanup_tcp_socket(tcp_sock_t *socket)
@@ -33,7 +34,7 @@ static int non_blocking_sock(int sockfd)
 static tcp_sock_t *accept_connexion(tcp_sock_t *server)
 {
     tcp_sock_t *client_sock = malloc(sizeof(tcp_sock_t));
-    assert(client_sock != NULL && "no memory avail");
+    ASSERT_MEM(client_sock);
 
     socklen_t client_addr_len = 0;
     client_sock->fd = accept(
@@ -90,9 +91,7 @@ static int __attribute__((unused)) on_read_echo(network_ctx_t *ctx, void *data)
     ssize_t msg_len = 0;
 
     while ((msg_len = recv(cli_fd, &buff, sizeof(buff), 0)) > 0) {
-        if (strcmp(buff, "exit\r\n") == 0) {
-            return SUCCESS;
-        }
+        if (strcmp(buff, "exit\r\n") == 0) return SUCCESS;
         write(1, buff, msg_len);
         write(cli_fd, buff, msg_len);
     }
@@ -109,7 +108,7 @@ static int __attribute__((unused)) on_read_echo(network_ctx_t *ctx, void *data)
 }
 
 static int __attribute__((unused)) on_recv_worker(
-    network_ctx_t *ctx, void *data)
+    network_ctx_t *ctx, void *data, coordinator_t *coord)
 {
     tcp_sock_t *client = (tcp_sock_t *)data;
     int cli_fd = client->fd;
@@ -124,10 +123,11 @@ static int __attribute__((unused)) on_recv_worker(
             close(cli_fd);
             return FAILURE;
         }
-        printf("[WORKER:%d][REQ:%d] received with opcode %d ", cli_fd, req.id,
+        printf("[WORKER:%d][REQ:%d] received with opcode %d\n", cli_fd, req.id,
             req.op);
-        // response_t __attribute__((unused)) resp = process_req(req,
-        // data->coord);
+        if (process_req(cli_fd, req, coord) == FAILURE) {
+            fprintf(stderr, "unable to process the request.\n");
+        }
     }
     // ignore EAGAIN cause we're using non blocking socket
     if (msg_len == -1 && errno != EAGAIN) {
@@ -143,19 +143,19 @@ static int __attribute__((unused)) on_recv_worker(
     return SUCCESS;
 }
 
-static int on_accept(network_ctx_t *ctx, __attribute__((unused)) void *data)
+static int on_accept(network_ctx_t *ctx, __attribute__((unused)) void *data,
+    __attribute__((unused)) coordinator_t *coord)
 {
     printf("Detecting connection\n");
     tcp_sock_t *client_sock = accept_connexion(ctx->serv);
     if (!client_sock) return FAILURE;
 
     handler_t *read_handler = malloc(sizeof(handler_t));
-    assert(read_handler != NULL && "read_handler no more space available");
+    ASSERT_MEM(read_handler);
     read_handler->fd = client_sock->fd;
     read_handler->callback = &on_recv_worker;
     read_handler->data = client_sock;
 
-    printf("mes couilles fd:::::: %d\n", read_handler->fd);
     struct epoll_event client_event = {
         .events = EPOLLIN | EPOLLET | EPOLLERR | EPOLLHUP,
         .data.ptr = read_handler,
@@ -203,14 +203,10 @@ int serve(network_ctx_t *ctx, coordinator_t __attribute__((unused)) coord)
         }
         for (int n = 0; n < nfds; n++) {
             printf("events [%d] type %#x\n", n, events[n].events);
-            // if (events[n].data.fd == ctx->serv->fd) {
-            //     on_accept(ctx, NULL);
-            // } else {
             assert(events[n].data.ptr != NULL);
             handler_t *handle = (handler_t *)events[n].data.ptr;
             printf("handling event for fd:::::: %d\n", handle->fd);
-            handle->callback(ctx, handle->data);
-            // }
+            handle->callback(ctx, handle->data, &coord);
         }
     }
     return SUCCESS;
@@ -222,7 +218,7 @@ int run_server(coordinator_t coord)
 {
     int ret_val = SUCCESS;
     network_ctx_t *net_ctx = malloc(sizeof(network_ctx_t));
-    assert(net_ctx != NULL && "Could not allocate network context");
+    ASSERT_MEM_CTX(net_ctx, "Could not allocate network context");
 
     net_ctx->serv = tcp_listen(coord.running_port);
     if (!net_ctx->serv)

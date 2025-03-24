@@ -8,6 +8,9 @@
 
 #define INIT_CAP 256
 
+#define ASSERT_MEM(v) assert((v) != NULL && "No memory available");
+#define ASSERT_MEM_CTX(v, ctx_str) assert((v) != NULL && #ctx_str);
+
 #define da_append(arr, item)                                                   \
     do {                                                                       \
         if ((arr)->count >= (arr)->capacity) {                                 \
@@ -15,7 +18,7 @@
                 = (arr)->capacity == 0 ? INIT_CAP : (arr)->capacity * 2;       \
             (arr)->items = realloc(                                            \
                 (arr)->items, (arr)->capacity * sizeof(*(arr)->items));        \
-            assert((arr)->items != NULL);                                      \
+            ASSERT_MEM((arr)->items);                                          \
         }                                                                      \
         (arr)->items[(arr)->count++] = (item);                                 \
     } while (0)

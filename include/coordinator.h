@@ -19,6 +19,8 @@
 #define DEFAULT_RUNNING_PORT 4269
 #define DEFAULT_NREDUCE 3
 
+#define OUT_PREFIX "mr-out-"
+
 typedef enum task_state_e {
     IDLE = 0,
     IN_PROGESS,
@@ -37,7 +39,7 @@ typedef struct machine_s {
 } machine_t;
 
 typedef struct task_s {
-    task_type_t state;
+    task_type_t type;
     machine_t worker;
     int id;
 } task_t;
@@ -62,7 +64,6 @@ typedef struct coordinator_s {
 typedef struct tcp_sock_s {
     struct sockaddr_in addr;
     int fd;
-    // struct epoll_event *event;
 } tcp_sock_t;
 
 typedef struct clients_s {
@@ -77,7 +78,7 @@ typedef struct network_context_s {
     int epfd;
 } network_ctx_t;
 
-typedef int (*fptr_t)(network_ctx_t *, void *);
+typedef int (*fptr_t)(network_ctx_t *, void *, coordinator_t *);
 
 typedef struct handler_s {
     int fd;

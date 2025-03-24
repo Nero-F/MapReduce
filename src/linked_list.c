@@ -101,13 +101,14 @@ bool list_del_elem_at_position(llist_t *front_ptr, unsigned int position)
     return true;
 }
 
-void list_clear(llist_t *front_ptr)
+void list_clear(llist_t *front_ptr, bool is_value_allocated)
 {
     node_t *node = *front_ptr;
 
     if (!front_ptr) return;
     while ((*front_ptr)->next) {
         node = (*front_ptr)->next;
+        if (is_value_allocated) free((*front_ptr)->value);
         free(*front_ptr);
         *front_ptr = node;
     }

@@ -1,4 +1,5 @@
 #include "common.h"
+#include "linked_list.h"
 #include "coordinator.h"
 #include <bits/getopt_core.h>
 #include <getopt.h>
@@ -52,7 +53,7 @@ static int parse_arg(const int ac, char *const av[], coordinator_t *coord)
                 break;
             case 'h':
                 display_help();
-                return SUCCESS;
+                exit(SUCCESS);
             default:
                 return FAILURE;
         }
@@ -67,6 +68,34 @@ static int parse_arg(const int ac, char *const av[], coordinator_t *coord)
     return SUCCESS;
 }
 
+static llist_t init_task(task_type_t type, uint size)
+{
+    llist_t task_list = NULL;
+
+    machine_t m = {
+        .id = -1,
+        .state = IDLE,
+    };
+
+    for (uint i = 0; i < size; i++) {
+        task_t *t = malloc(sizeof(task_t));
+        ASSERT_MEM(t);
+        t->id = i;
+        t->worker = m;
+        t->type = type;
+        assert(list_add_elem_at_back(&task_list, t) != false
+            && "could not add to tasklist\n");
+    }
+    return task_list;
+}
+
+static void deinint_coord(coordinator_t *coord)
+{
+    if (coord->files) free(coord->files->items);
+    if (coord->map_task) list_clear(&coord->map_task, true);
+    if (coord->reduce_task) list_clear(&coord->reduce_task, true);
+}
+
 int main(const int ac, char *const av[])
 {
     int ret_val = SUCCESS;
@@ -76,10 +105,13 @@ int main(const int ac, char *const av[])
 
     if (parse_arg(ac, av, &coord) == FAILURE)
         ret_val = FAILURE;
-    else // TODO: handle the case where help is specified to not run this
+    else {
+        coord.map_task = init_task(MAP, coord.files->count);
+        coord.n_map = coord.files->count;
+        coord.reduce_task = init_task(REDUCE, coord.n_reduce);
         ret_val = run_server(coord);
-
-    if (coord.files) free(coord.files->items);
+    }
+    deinint_coord(&coord);
 
     return ret_val;
 }
