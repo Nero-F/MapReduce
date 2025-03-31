@@ -8,6 +8,7 @@
 typedef enum opcode_e {
     REQ_WORK = 0,
     REQ_NREDUCE,
+    PING, // from coord to worker only
     TASK_DONE,
 } opcode_t;
 
@@ -35,6 +36,21 @@ typedef struct response_s {
     byte ack;
     byte id;
 } __attribute__((packed)) response_t;
+
+typedef union msg_data {
+    request_t req;
+    response_t res;
+} msg_data_u;
+
+typedef enum msg_type_e {
+    REQUEST = 0,
+    RESPONSE,
+} msg_type_t;
+
+typedef struct msg_s {
+    msg_type_t type;
+    msg_data_u data;
+} msg_t;
 
 int process_req(int, request_t, coordinator_t *);
 
