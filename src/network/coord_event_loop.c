@@ -107,27 +107,40 @@ static int __attribute__((unused)) on_read_echo(network_ctx_t *ctx, void *data)
     return SUCCESS;
 }
 
-static int __attribute__((unused)) on_recv_worker(
-    network_ctx_t *ctx, void *data, coordinator_t *coord)
+static void on_recv_process_msg(msg_t msg, int cli_fd, coordinator_t *coord)
+{
+    switch (msg.type) {
+        case REQUEST:
+            printf("[WORKER:%d][REQ:%d] received with opcode %d\n", cli_fd,
+                msg.data.req.id, msg.data.req.op);
+            if (process_req(cli_fd, msg.data.req, coord) == FAILURE) {
+                fprintf(stderr, "unable to process the request.\n");
+            }
+            break;
+        case RESPONSE:
+            assert(msg.data.res.op != PING);
+            printf("[WORKER:%d][HEARTBEAT] received\n", cli_fd);
+    }
+}
+
+static int on_recv_worker(network_ctx_t *ctx, void *data, coordinator_t *coord)
 {
     tcp_sock_t *client = (tcp_sock_t *)data;
     int cli_fd = client->fd;
-    printf("reading from worker: %d\n", cli_fd);
+    printf("[WORKER:%d] receivedv an event...\n", cli_fd);
 
-    request_t req = { 0 };
     ssize_t msg_len = 0;
+    msg_t msg = { 0 };
 
-    while ((msg_len = recv(cli_fd, (byte *)&req, sizeof(req), 0)) > 0) {
-        if (req.ack != ACK) {
+    while ((msg_len = recv(cli_fd, &msg, sizeof(msg_t), 0)) > 0) {
+        printf("ack %d\n", msg.ack);
+        // TBD: maybe ignore in this case instead of quitting
+        if (msg.ack != ACK) {
             fprintf(stderr, "ACK not valid\n");
             close(cli_fd);
             return FAILURE;
         }
-        printf("[WORKER:%d][REQ:%d] received with opcode %d\n", cli_fd, req.id,
-            req.op);
-        if (process_req(cli_fd, req, coord) == FAILURE) {
-            fprintf(stderr, "unable to process the request.\n");
-        }
+        on_recv_process_msg(msg, cli_fd, coord);
     }
     // ignore EAGAIN cause we're using non blocking socket
     if (msg_len == -1 && errno != EAGAIN) {
@@ -196,16 +209,13 @@ int serve(network_ctx_t *ctx, coordinator_t __attribute__((unused)) coord)
 
     while (1) {
         nfds = epoll_wait(ctx->epfd, events, MAX_EVENTS, -1);
-        printf("---> %d events received \n", nfds);
         if (nfds == -1) {
             perror("epoll_wait");
             return FAILURE;
         }
         for (int n = 0; n < nfds; n++) {
-            printf("events [%d] type %#x\n", n, events[n].events);
             assert(events[n].data.ptr != NULL);
             handler_t *handle = (handler_t *)events[n].data.ptr;
-            printf("handling event for fd:::::: %d\n", handle->fd);
             handle->callback(ctx, handle->data, &coord);
         }
     }

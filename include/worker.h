@@ -1,7 +1,9 @@
 #ifndef WORKER_H_
 #define WORKER_H_
 
+#include "coordinator.h"
 #include <assert.h>
+#include <stdbool.h>
 #include <stddef.h>
 #include <dlfcn.h>
 #include <getopt.h>
@@ -33,10 +35,14 @@ typedef struct worker_s {
     map_t *map;
     reduce_t *reduce;
 
-    int sockfd;
+    // coord socket file descriptor
+    int coord_fd;
 
     int n_reduce;
+    task_state_t state;
     struct addrinfo *coord_info;
+
+    pthread_rwlock_t rwlock;
 } worker_t;
 
 int load_mr_plugs(const char *, worker_t *);

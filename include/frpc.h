@@ -15,7 +15,6 @@ typedef enum opcode_e {
 typedef char byte;
 typedef struct request_s {
     opcode_t op;
-    byte ack;
     byte id;
 } __attribute__((packed)) request_t;
 
@@ -33,7 +32,6 @@ typedef union inner_data {
 typedef struct response_s {
     inner_data_u data;
     opcode_t op;
-    byte ack;
     byte id;
 } __attribute__((packed)) response_t;
 
@@ -50,7 +48,8 @@ typedef enum msg_type_e {
 typedef struct msg_s {
     msg_type_t type;
     msg_data_u data;
-} msg_t;
+    byte ack;
+} __attribute__((packed)) msg_t;
 
 int process_req(int, request_t, coordinator_t *);
 

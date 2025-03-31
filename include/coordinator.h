@@ -2,9 +2,11 @@
 #define COORDINATOR_H_
 
 #include "common.h"
+#include "mapreduce.h"
 #include "linked_list.h"
 
 #include <assert.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -14,24 +16,13 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #define DEFAULT_RUNNING_PORT 4269
 #define DEFAULT_NREDUCE 3
 
 #define OUT_PREFIX "mr-out-"
-
-typedef enum task_state_e {
-    IDLE = 0,
-    IN_PROGESS,
-    COMPLETED,
-} task_state_t;
-
-typedef enum task_type_e {
-    NONE = 0,
-    MAP,
-    REDUCE,
-} task_type_t;
 
 typedef struct machine_s {
     task_state_t state;
@@ -55,6 +46,9 @@ typedef struct coordinator_s {
     files_t output_files;
 
     int running_port;
+
+    bool pinger_running;
+    pthread_rwlock_t rwlock;
 } coordinator_t;
 
 // Network stuffs
