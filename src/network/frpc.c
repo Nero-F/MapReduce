@@ -2,10 +2,10 @@
 #include "frpc.h"
 #include "coordinator.h"
 
-response_t ask_work(request_t req, coordinator_t *coord)
+response_t ask_work(asked_t asked, coordinator_t *coord)
 {
     response_t res = {
-        .id = req.id,
+        .id = asked.req.id,
         .op = REQ_WORK,
     };
 
@@ -31,6 +31,7 @@ response_t ask_work(request_t req, coordinator_t *coord)
         task_t *task = (task_t *)node->value;
         if ((*task).worker.state == IDLE) {
             (*task).worker.state = IN_PROGESS;
+            (*task).worker.id = asked.cli_fd;
             (*task).type = work.type;
             work.split = coord->files->items[task->id];
             res.data.task_work = work;
@@ -44,13 +45,13 @@ response_t ask_work(request_t req, coordinator_t *coord)
     return res;
 }
 
-response_t ask_nreduce(request_t req, coordinator_t *coord)
+response_t ask_nreduce(asked_t asked, coordinator_t *coord)
 {
     printf("requesting nreduce...\n");
 
     response_t resp = {
-        .id = req.id,
-        .op = req.op,
+        .id = asked.req.id,
+        .op = asked.req.op,
         .data = (inner_data_u) {
             .nrduce = coord->n_reduce,
         },
@@ -58,14 +59,13 @@ response_t ask_nreduce(request_t req, coordinator_t *coord)
     return resp;
 }
 
-response_t (*fptr_tbl[])(request_t req, coordinator_t *coord) = {
+response_t (*fptr_tbl[])(asked_t asked, coordinator_t *coord) = {
     &ask_work,
     &ask_nreduce,
     NULL,
 };
 
 typedef struct pinger_data_s {
-    coordinator_t *coord;
     work_t work;
     int cli_fd;
 } pinger_data_t;
@@ -94,7 +94,7 @@ void *work_pinger(void *data)
         .data.req = req,
     };
     while (1) {
-        printf("sending heartbeat\n");
+        printf("sending heartbeat to [WORKER:%d]\n", p_data->cli_fd);
         if (send(p_data->cli_fd, &msg, sizeof(msg_t), 0) == -1) {
             if (errno == ETIMEDOUT) fprintf(stderr, "timedout on send");
             perror("send HEARTBEAT");
@@ -107,26 +107,27 @@ void *work_pinger(void *data)
     return NULL;
 }
 
-int start_ping_thread(int cli_fd, coordinator_t *coord, work_t task_work)
+int start_ping_thread(pthread_t *thread, int cli_fd, work_t task_work)
 {
-    pthread_t thrd = { 0 };
     pinger_data_t *p_data = malloc(sizeof(pinger_data_t));
+    pthread_t thrd = { 0 };
 
     ASSERT_MEM_CTX(p_data, "ping thread");
     p_data->cli_fd = cli_fd;
-    p_data->coord = coord;
     p_data->work = task_work;
-    coord->pinger_running = true;
+
+    printf("thread  >>>>> %p\n", thread);
 
     if (pthread_create(&thrd, NULL, &work_pinger, p_data) != 0) {
         perror("Failed init ping thread");
         return FAILURE;
     }
+    thread = &thrd;
     return SUCCESS;
 }
 int process_req(int cli_fd, request_t req, coordinator_t *coord)
 {
-    response_t resp = fptr_tbl[req.op](req, coord);
+    response_t resp = fptr_tbl[req.op]((asked_t) { req, cli_fd }, coord);
     msg_t msg = {
         .ack = ACK,
         .type = RESPONSE,
@@ -139,8 +140,14 @@ int process_req(int cli_fd, request_t req, coordinator_t *coord)
     }
     // If work has been assigned we periodically ping workers to check failed
     // workers (cf. 3.3 Fault tolerance)
-    if (coord->pinger_running == false && resp.op == REQ_WORK
-        && resp.data.task_work.type != NONE)
-        return start_ping_thread(cli_fd, coord, resp.data.task_work);
+    foreach_ll(task_t, t, coord->map_task)
+    {
+        printf("@ [TASK:%d][machine:%d|state:%d]", t->id, t->worker.id,
+            t->worker.state);
+        printf(" thread running: %s \n", t->thread ? "true" : "false");
+        if (t->thread == NULL && resp.op == REQ_WORK
+            && resp.data.task_work.type != NONE)
+            return start_ping_thread(t->thread, cli_fd, resp.data.task_work);
+    }
     return SUCCESS;
 }

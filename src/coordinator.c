@@ -84,6 +84,7 @@ static llist_t init_tasks(task_type_t type, uint size)
         t->id = i;
         t->worker = m;
         t->type = type;
+        t->thread = NULL;
         assert(list_add_elem_at_back(&task_list, t) != false
             && "could not add to tasklist\n");
     }

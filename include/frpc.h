@@ -51,6 +51,11 @@ typedef struct msg_s {
     byte ack;
 } __attribute__((packed)) msg_t;
 
+typedef struct asked_s {
+    request_t req;
+    int cli_fd;
+} asked_t;
+
 int process_req(int, request_t, coordinator_t *);
 
 #endif /* _F_RPC_H_ */

@@ -30,8 +30,9 @@ typedef struct machine_s {
 } machine_t;
 
 typedef struct task_s {
-    task_type_t type;
+    pthread_t *thread;
     machine_t worker;
+    task_type_t type;
     int id;
 } task_t;
 

@@ -16,10 +16,9 @@ typedef void (*value_displayer_t)(const void *value);
 
 void list_dump(llist_t list, value_displayer_t val_disp);
 
-#define foreach_ll(type, item, linkedlist)                                     \
-    type item = *((type *)(linkedlist)->value);                                \
-    for (node_t *_tmp = linkedlist; _tmp != NULL;                              \
-        item = *((type *)_tmp->value), _tmp = (_tmp)->next)
+#define foreach_ll(type, item, ll)                                                    \
+    for (node_t *n = (ll); n != NULL; n = n->next)                             \
+        for (type *item = (type *)n->value; item != NULL; item = NULL)
 
 bool list_add_elem_at_front(llist_t *front_ptr, void *elem);
 bool list_add_elem_at_back(llist_t *front_ptr, void *elem);
