@@ -107,7 +107,7 @@ void *work_pinger(void *data)
     return NULL;
 }
 
-int start_ping_thread(pthread_t *thread, int cli_fd, work_t task_work)
+int start_ping_thread(pthread_t __attribute__((unused))*thread, int cli_fd, work_t task_work)
 {
     pinger_data_t *p_data = malloc(sizeof(pinger_data_t));
     pthread_t thrd = { 0 };
@@ -116,8 +116,7 @@ int start_ping_thread(pthread_t *thread, int cli_fd, work_t task_work)
     p_data->cli_fd = cli_fd;
     p_data->work = task_work;
 
-    printf("thread  >>>>> %p\n", thread);
-
+    // TODO: find a way to end threads properly when worker are done
     if (pthread_create(&thrd, NULL, &work_pinger, p_data) != 0) {
         perror("Failed init ping thread");
         return FAILURE;
@@ -125,6 +124,7 @@ int start_ping_thread(pthread_t *thread, int cli_fd, work_t task_work)
     thread = &thrd;
     return SUCCESS;
 }
+
 int process_req(int cli_fd, request_t req, coordinator_t *coord)
 {
     response_t resp = fptr_tbl[req.op]((asked_t) { req, cli_fd }, coord);

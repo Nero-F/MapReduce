@@ -26,6 +26,11 @@
 #define foreach(type, item, da)                                                \
     for (type *item = (da)->items; item < (da)->items + (da)->count; item++)
 
+#define foreach_p(type, idx, item, da)                                         \
+    size_t idx = 0;                                                            \
+    for (type *item = (da)->items; item < (da)->items + (da)->count;           \
+        item++, idx++)
+
 typedef struct files_s {
     size_t count;
     size_t capacity;

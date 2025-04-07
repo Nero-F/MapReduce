@@ -127,7 +127,7 @@ static int on_recv_worker(network_ctx_t *ctx, void *data, coordinator_t *coord)
 {
     tcp_sock_t *client = (tcp_sock_t *)data;
     int cli_fd = client->fd;
-    printf("[WORKER:%d] receivedv an event...\n", cli_fd);
+    printf("[WORKER:%d] received an event...\n", cli_fd);
 
     ssize_t msg_len = 0;
     msg_t msg = { 0 };
