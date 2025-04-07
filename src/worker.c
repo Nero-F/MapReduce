@@ -1,13 +1,16 @@
 #include "common.h"
 #include "worker.h"
-#include "coordinator.h"
-#include <sys/stat.h>
 #include "frpc.h"
+#include "mapreduce.h"
+
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <bits/getopt_core.h>
 #include <netdb.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <unistd.h>
 
 static void display_help(void)
 {
@@ -52,7 +55,7 @@ static int parse_arg(const int ac, char *const av[], worker_t *worker)
     return SUCCESS;
 }
 
-static int end_coord(worker_t *worker, char *err_msg)
+int end_coord(worker_t *worker, char *err_msg)
 {
     if (err_msg != NULL) perror(err_msg);
     if (worker->plug_handle) dlclose(worker->plug_handle);
@@ -61,58 +64,99 @@ static int end_coord(worker_t *worker, char *err_msg)
     return FAILURE;
 }
 
-#define RETRY_CALL(err_msg)                                                    \
-    do {                                                                       \
-        if (try_nbr < retry) {                                                 \
-            try_nbr++;                                                         \
-            goto try_call;                                                     \
-        } else {                                                               \
-            perror(err_msg);                                                   \
-            return FAILURE;                                                    \
-        }                                                                      \
-    } while (0)
-
-int call(opcode_t op, worker_t *worker, response_t *resp, uint retry)
+int encode_to_file(FILE *fs, kva_t *kva)
 {
-    static size_t id = 0;
-    int sockfd = worker->coord_fd;
-    struct addrinfo *coord_info = worker->coord_info;
-    uint try_nbr = 0;
-
-    msg_t msg = {
-        .ack = ACK,
-        .type = REQUEST,
-        .data.req = {
-        .id = id++,
-        .op = op,
-        },
-    };
-
-try_call:
-    if (sendto(sockfd, &msg, sizeof(msg_t), 0, coord_info->ai_addr,
-            coord_info->ai_addrlen)
-        == -1)
-        RETRY_CALL("sendto");
-
-    if (recvfrom(sockfd, &msg, sizeof(msg_t), 0, coord_info->ai_addr,
-            &coord_info->ai_addrlen)
-        == -1)
-        RETRY_CALL("recvfrom");
-    *resp = msg.data.res;
+    foreach (kv_t, kv, kva) {
+        fwrite(kv->key, sizeof(char), strlen(kv->key), fs);
+        fwrite(kv->value, sizeof(char), strlen(kv->key), fs);
+    }
     return SUCCESS;
 }
 
-// TODO: maybe check resp ACK
-#define CALL(op, worker, resp, try_nbr)                                        \
-    do {                                                                       \
-        if (call(op, worker, resp, 0) == FAILURE) {                            \
-            fprintf(stderr, "could not contact coordinator\n");                \
-            return FAILURE;                                                    \
-        }                                                                      \
-    } while (0)
-
-bool _map(const uint id, const char *filename, map_t *emit)
+int write_result(kva_t *intermediate, int id, size_t idx)
 {
+    char *tmp_filename = NULL;
+    asprintf(&tmp_filename, "mr-%d-%ld-XXXXXX", id, idx);
+    ASSERT_MEM_CTX(tmp_filename, "Intermediate result writing");
+
+    int tmp_fd = mkstemp(tmp_filename);
+
+    if (tmp_fd == -1) {
+        perror("Intermediate tmp result file creation");
+        free(tmp_filename);
+        return FAILURE;
+    }
+    FILE *tmp_fs = fdopen(tmp_fd, "w");
+    if (tmp_fs == NULL) {
+        perror("Intermediate tmp result file opening");
+        close(tmp_fd);
+        unlink(tmp_filename);
+        free(tmp_filename);
+        return FAILURE;
+    }
+    if (encode_to_file(tmp_fs, intermediate) == FAILURE) {
+        perror("Intermediate tmp result encoding");
+        close(tmp_fd);
+        unlink(tmp_filename);
+        free(tmp_filename);
+        return FAILURE;
+    }
+
+    fclose(tmp_fs);
+
+    char *oname = NULL;
+    asprintf(&oname, "mr-%d-%ld", id, idx);
+    ASSERT_MEM_CTX(oname, "Intermediate result writing");
+    if (rename(tmp_filename, oname) - 1) {
+        perror("Intermediate tmp file renaming");
+        unlink(tmp_filename);
+        free(tmp_filename);
+        return FAILURE;
+    }
+    printf("Successfully saved result to %s.", oname);
+    free(oname);
+    return SUCCESS;
+}
+
+#define FNV_PRIME 0x100000001b3
+#define FNV_OFFSET_BASIS 0xcbf29ce484222325
+uint64_t hash(const char *key)
+{
+    uint64_t h = FNV_OFFSET_BASIS;
+    size_t key_len = strlen(key);
+    size_t i = 0;
+
+    while (i < key_len) {
+        h ^= key[i++];
+        h *= FNV_PRIME;
+    }
+    return h;
+}
+
+int save_intermediate_result(const uint id, kva_t kva, const uint n_reduce)
+{
+    kva_t *intermediate = malloc(sizeof(kva_t) * (n_reduce + 1));
+
+    ASSERT_MEM_CTX(intermediate, "Intermediate result writing");
+    intermediate[n_reduce].items = NULL;
+
+    foreach (kv_t, kv, &kva) {
+        int r = hash(kv->key) % n_reduce;
+        da_append(&intermediate[r], *kv);
+    }
+    for (size_t idx = 0; idx < intermediate->capacity; ++idx) {
+        if (write_result(intermediate, id, idx) == FAILURE) {
+            free(intermediate);
+            return FAILURE;
+        }
+    }
+    free(intermediate);
+    return SUCCESS;
+}
+
+bool _map(const uint id, const char *filename, map_t *emit, const uint n_reduce)
+{
+    int res = SUCCESS;
     int fd = open(filename, O_RDONLY);
     struct stat statbuf = { 0 };
     int file_size = 0;
@@ -137,11 +181,12 @@ bool _map(const uint id, const char *filename, map_t *emit)
     buffer[file_size] = '\0';
     read(fd, buffer, file_size);
 
-    emit(filename, buffer);
+    kva_t kva = emit(filename, buffer);
+    res = save_intermediate_result(id, kva, n_reduce);
 
     free(buffer);
     close(fd);
-    return true;
+    return res;
 }
 
 typedef struct thread_work_s {
@@ -152,10 +197,10 @@ typedef struct thread_work_s {
 void *do_task(void *data)
 {
     thread_work_t *twork = (thread_work_t *)data;
-    worker_t *worker = twork->worker;
 
-    // if (twork->work.type == MAP)
-    // _map(twork->work.id, twork->work.split, twork->worker->map);
+    if (twork->work.type == MAP)
+        _map(twork->work.id, twork->work.split, twork->worker->map,
+            twork->worker->n_reduce);
 
     printf("dowork\n");
     while (1) {
@@ -187,7 +232,8 @@ int ping_handler(worker_t *worker)
         }
         if (msg_req.ack != ACK) {
             fprintf(stderr,
-                "could not recognize following request with ID: %d from %s\n",
+                "could not recognize following request with ID: %d from "
+                "%s\n",
                 msg_req.data.req.id, worker->coord_addr);
             continue;
         }
@@ -249,39 +295,6 @@ int work(worker_t *worker)
     pthread_detach(*thread);
     free(thread);
     return ret_val;
-}
-
-static int connect_to_coord(worker_t *worker)
-{
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    int ret_gai = 0;
-    struct sockaddr_in sockaddr = { 0 };
-
-    struct addrinfo *coord_info = { 0 };
-
-    struct addrinfo hints = { 0 };
-    hints.ai_family = AF_INET; // TBD: maybe change for AF_UNSPEC
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE; // whildcard IP address
-    hints.ai_protocol = IPPROTO_TCP;
-
-    if (sockfd == -1) return end_coord(worker, "socket");
-    worker->coord_fd = sockfd;
-    if (bind(sockfd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) == -1)
-        return end_coord(worker, "bind");
-
-    ret_gai = getaddrinfo(
-        worker->coord_addr, worker->coord_port, &hints, &coord_info);
-
-    if (ret_gai != 0) {
-        fprintf(stderr, "[ERROR]: %s\n", gai_strerror(ret_gai));
-        return end_coord(worker, NULL);
-    }
-    worker->coord_info = coord_info;
-    if (connect(sockfd, coord_info->ai_addr, coord_info->ai_addrlen) == -1)
-        return end_coord(worker, "connect");
-
-    return SUCCESS;
 }
 
 int main(const int argc, char *const argv[])

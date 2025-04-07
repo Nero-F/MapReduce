@@ -2,7 +2,8 @@ BLUE	=		\033[36m
 WHITE	=		\033[0m
 
 WRKR_SRC	=	src/worker.c			\
-			src/plug_loading.c	
+			src/plug_loading.c		\
+			src/network/worker_connection.c
 
 COORD_SRC	=	src/coordinator.c 		\
 			src/linked_list.c 		\
@@ -12,21 +13,23 @@ COORD_SRC	=	src/coordinator.c 		\
 WRKR_OBJS	=	$(WRKR_SRC:%.c=%.o)
 COORD_OBJS	=	$(COORD_SRC:%.c=%.o)
 
-PLUG 	=	plug
+PLUG 		=	plug
 
-CFLAGS	=	-W -Wall -Wextra -g -O3 -fshort-enums #-Werror 
-CPPFLAGS =	-I./include/
+CFLAGS		=	-W -Wall -Wextra -g -O3 -fshort-enums #-Werror -ldl
+CPPFLAGS	=	-I./include/
 
-WORKER	=	worker
+LDFLAGS 	= 	-lncurses
+
+WORKER		=	worker
 COORDINATOR	=	coordinator
 
-all: $(WORKER) $(COORDINATOR)
+all: $(WORKER) $(COORDINATOR) $(PLUG)
 
 $(PLUG): ## build plug.so
 	$(CC) ./src/$@.c -fpic -shared -o $@.so
 
 $(COORDINATOR): $(COORD_OBJS) ## build coordinator binary
-	$(CC) $^ -o $@ $(CFLAGS) -DPOLLER -DDEBUG
+	$(CC) $^ -o $@ $(CFLAGS) -DPOLLER -DDEBUG $(LDFLAGS)
 
 $(WORKER): $(WRKR_OBJS) ## build worker binary
 	$(CC) $^ -o $@ $(CFLAGS)
