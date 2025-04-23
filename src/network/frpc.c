@@ -1,6 +1,7 @@
 #include <errno.h>
 #include "frpc.h"
 #include "coordinator.h"
+#include "mapreduce.h"
 
 response_t ask_work(asked_t asked, coordinator_t *coord)
 {
@@ -12,13 +13,11 @@ response_t ask_work(asked_t asked, coordinator_t *coord)
     work_t work = { 0 };
     llist_t tasks = NULL;
 
-    // Check the length of the number of task
+    // Checks the length of the number of task
     if (coord->n_map > 0) {
-        work.id = coord->n_map;
         work.type = MAP;
         tasks = coord->map_task;
     } else if (coord->n_reduce > 0) {
-        work.id = coord->n_reduce;
         work.type = REDUCE;
         tasks = coord->reduce_task;
     } else {
@@ -27,16 +26,19 @@ response_t ask_work(asked_t asked, coordinator_t *coord)
     }
 
     node_t *node = tasks;
+    int id = 0;
     while (node) {
         task_t *task = (task_t *)node->value;
         if ((*task).worker.state == IDLE) {
             (*task).worker.state = IN_PROGESS;
             (*task).worker.id = asked.cli_fd;
             (*task).type = work.type;
-            work.split = coord->files->items[task->id];
+            strcpy(work.split, coord->files->items[task->id]);
+            work.id = id;
             res.data.task_work = work;
             break;
         }
+        ++id;
         node = node->next;
     }
     printf("[%d] task %d was assigned to machine with split {%s}\n",
@@ -107,7 +109,8 @@ void *work_pinger(void *data)
     return NULL;
 }
 
-int start_ping_thread(pthread_t __attribute__((unused))*thread, int cli_fd, work_t task_work)
+int start_ping_thread(
+    pthread_t * thread, int cli_fd, work_t task_work)
 {
     pinger_data_t *p_data = malloc(sizeof(pinger_data_t));
     pthread_t thrd = { 0 };
