@@ -26,7 +26,7 @@ COORDINATOR	=	coordinator
 all: $(WORKER) $(COORDINATOR) $(PLUG)
 
 $(PLUG): ## build plug.so
-	$(CC) ./src/$@.c -fpic -shared -o $@.so
+	$(CC) ./src/$@.c -fpic -shared -o $@.so $(CPPFLAGS)
 
 $(COORDINATOR): $(COORD_OBJS) ## build coordinator binary
 	$(CC) $^ -o $@ $(CFLAGS) -DPOLLER -DDEBUG $(LDFLAGS)
@@ -41,7 +41,7 @@ run_worker: $(WORKER) $(PLUG) ## build and run worker
 	./$< ./$(PLUG).so
 
 clean: ## deleting objects files
-	$(RM) $(WRKR_OBJS) $(COORD_OBJS) vgcore.*
+	$(RM) $(WRKR_OBJS) $(COORD_OBJS) vgcore.* mr-*
 
 fclean: clean ## deleting binaries and shared object
 	$(RM) $(WORKER) $(COORDINATOR) $(PLUG).so
