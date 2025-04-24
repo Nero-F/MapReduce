@@ -1,13 +1,40 @@
+#include <stddef.h>
 #include <stdio.h>
+#include <string.h>
+#include "common.h"
+#include "mapreduce.h"
 
-int map(const char *key, const char *value)
+/*
+ * DISTRIBUTED WC
+ */
+
+kva_t map(char *filename, char *content)
 {
-    printf("map\n");
-    return 0;
+    char *word = strtok(content, "\n \t");
+    kva_t kva = { 0 };
+    printf("%s\n", filename);
+    // kva_t *kva = malloc(sizeof(kva_t));
+    // ASSERT_MEM(kva);
+
+    while (word != NULL) {
+        kv_t kv = { .key = strdup(word), .value = "1" };
+        da_append(&kva, kv);
+        word = strtok(NULL, "\n \t");
+    }
+
+    // foreach (kv_t, item, &kva) {
+    //     printf("item key: %s -- value: %s\n", item->key, item->value);
+    // }
+    return kva;
 }
 
-int reduce(int a, const char *key, const void *iterator[])
+char *reduce(const char *key, const void *values[])
 {
-    printf("reduce\n");
-    return 0;
+    size_t count = 0;
+    while (values[count] != NULL)
+        ++count;
+
+    char *s_count = NULL;
+    asprintf(&s_count, "%ld", count);
+    return s_count;
 }
