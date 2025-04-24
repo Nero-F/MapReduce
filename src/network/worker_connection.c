@@ -1,5 +1,10 @@
 #include "common.h"
+#include "defer.h"
+#include "frpc.h"
 #include "worker.h"
+#include <assert.h>
+#include <stdarg.h>
+#include <string.h>
 
 #define RETRY_CALL(err_msg)                                                    \
     do {                                                                       \
@@ -10,7 +15,7 @@
             perror(err_msg);                                                   \
             return FAILURE;                                                    \
         }                                                                      \
-    } while (0)
+    } while (0);
 
 int call(opcode_t op, worker_t *worker, response_t *resp, uint retry)
 {
@@ -22,11 +27,21 @@ int call(opcode_t op, worker_t *worker, response_t *resp, uint retry)
     msg_t msg = {
         .ack = ACK,
         .type = REQUEST,
-        .data.req = {
-        .id = id++,
-        .op = op,
-        },
     };
+    switch (op) {
+        case TASK_DONE:
+            assert(resp != NULL);
+            msg.data.res = *resp;
+        case REQ_WORK:
+        case REQ_NREDUCE:
+            msg.data.req = (request_t) {
+                .id = id++,
+                .op = op,
+            };
+            break;
+        case PING:
+            break;
+    }
 
 try_call:
     if (sendto(sockfd, &msg, sizeof(msg_t), 0, coord_info->ai_addr,

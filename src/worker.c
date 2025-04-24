@@ -1,5 +1,6 @@
 #include "common.h"
 #include "worker.h"
+#include "defer.h"
 #include "frpc.h"
 #include "mapreduce.h"
 
@@ -67,54 +68,53 @@ int end_coord(worker_t *worker, char *err_msg)
 int encode_to_file(FILE *fs, kva_t *kva)
 {
     foreach (kv_t, kv, kva) {
-        fwrite(kv->key, sizeof(char), strlen(kv->key), fs);
-        fwrite(kv->value, sizeof(char), strlen(kv->key), fs);
+        int len_key = strlen(kv->key);
+        int len_value = strlen(kv->value);
+        fwrite(&len_key, sizeof(int), 1, fs);
+        fwrite(kv->key, sizeof(char), len_key, fs);
+        fwrite(&len_value, sizeof(int), 1, fs);
+        fwrite(kv->value, sizeof(char), len_value, fs);
     }
     return SUCCESS;
 }
 
-int write_result(kva_t *intermediate, int id, size_t idx)
+int write_result(kva_t *intermediate, int id, int reduce_id)
 {
     char *tmp_filename = NULL;
-    asprintf(&tmp_filename, "mr-%d-%ld-XXXXXX", id, idx);
-    ASSERT_MEM_CTX(tmp_filename, "Intermediate result writing");
 
+    asprintf(&tmp_filename, "mr-%d-%d-XXXXXX", id, reduce_id);
+    ASSERT_MEM_CTX(tmp_filename, "Intermediate result writing");
+    DEFER({ free(tmp_filename); });
     int tmp_fd = mkstemp(tmp_filename);
 
     if (tmp_fd == -1) {
         perror("Intermediate tmp result file creation");
-        free(tmp_filename);
         return FAILURE;
     }
+    DEFER({ close(tmp_fd); });
     FILE *tmp_fs = fdopen(tmp_fd, "w");
     if (tmp_fs == NULL) {
         perror("Intermediate tmp result file opening");
-        close(tmp_fd);
         unlink(tmp_filename);
-        free(tmp_filename);
         return FAILURE;
     }
+    DEFER({ fclose(tmp_fs); });
     if (encode_to_file(tmp_fs, intermediate) == FAILURE) {
         perror("Intermediate tmp result encoding");
-        close(tmp_fd);
         unlink(tmp_filename);
-        free(tmp_filename);
         return FAILURE;
     }
-
-    fclose(tmp_fs);
 
     char *oname = NULL;
-    asprintf(&oname, "mr-%d-%ld", id, idx);
+    asprintf(&oname, "mr-%d-%d", id, reduce_id);
     ASSERT_MEM_CTX(oname, "Intermediate result writing");
-    if (rename(tmp_filename, oname) - 1) {
+    DEFER({ free(oname); });
+    if (rename(tmp_filename, oname) == -1) {
         perror("Intermediate tmp file renaming");
         unlink(tmp_filename);
-        free(tmp_filename);
         return FAILURE;
     }
-    printf("Successfully saved result to %s.", oname);
-    free(oname);
+    printf("Successfully saved result to %s.\n", oname);
     return SUCCESS;
 }
 
@@ -138,19 +138,17 @@ int save_intermediate_result(const uint id, kva_t kva, const uint n_reduce)
     kva_t *intermediate = malloc(sizeof(kva_t) * (n_reduce + 1));
 
     ASSERT_MEM_CTX(intermediate, "Intermediate result writing");
+    DEFER({ free(intermediate); });
     intermediate[n_reduce].items = NULL;
 
     foreach (kv_t, kv, &kva) {
         int r = hash(kv->key) % n_reduce;
         da_append(&intermediate[r], *kv);
     }
-    for (size_t idx = 0; idx < intermediate->capacity; ++idx) {
-        if (write_result(intermediate, id, idx) == FAILURE) {
-            free(intermediate);
-            return FAILURE;
-        }
+
+    for (uint idx = 0; idx < n_reduce; ++idx) {
+        if (write_result(intermediate, id, idx) == FAILURE) return FAILURE;
     }
-    free(intermediate);
     return SUCCESS;
 }
 
@@ -163,29 +161,25 @@ bool _map(const uint id, const char *filename, map_t *emit, const uint n_reduce)
     char *buffer = NULL;
 
     if (fd == -1) {
-        perror("fopen");
+        perror("open");
         return false;
     }
+    DEFER({ close(fd); });
     if (fstat(fd, &statbuf) == -1) {
-        close(fd);
-        perror("fopen");
+        perror("fstat");
         return false;
     }
     file_size = statbuf.st_size;
     buffer = malloc(sizeof(char) * (file_size + 1));
-    if (buffer == NULL) {
-        close(fd);
-        return false;
-    }
+    ASSERT_MEM(buffer);
+    DEFER({ free(buffer); });
 
     buffer[file_size] = '\0';
     read(fd, buffer, file_size);
-
     kva_t kva = emit(filename, buffer);
+    // TODO: free kva keys
     res = save_intermediate_result(id, kva, n_reduce);
 
-    free(buffer);
-    close(fd);
     return res;
 }
 
@@ -197,12 +191,14 @@ typedef struct thread_work_s {
 void *do_task(void *data)
 {
     thread_work_t *twork = (thread_work_t *)data;
+    response_t resp = { 0 };
 
-    if (twork->work.type == MAP)
+    if (twork->work.type == MAP) {
         _map(twork->work.id, twork->work.split, twork->worker->map,
             twork->worker->n_reduce);
+        // CALL(TASK_DONE, twork->worker, worker, &resp, 0);
+    }
 
-    printf("dowork\n");
     while (1) {
     }
     // else if (twork->work.type == REDUCE)
