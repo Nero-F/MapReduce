@@ -190,15 +190,23 @@ typedef struct thread_work_s {
     work_t work;
 } thread_work_t;
 
+int end_task(thread_work_t *twork, response_t *resp)
+{
+    printf("<<REQ_TASKDONE>>...\n");
+    CALL(TASK_DONE, twork->worker, resp, 3);
+    return SUCCESS;
+}
+
 void *do_task(void *data)
 {
     thread_work_t *twork = (thread_work_t *)data;
     response_t resp = { 0 };
 
-    if (twork->work.type == MAP) {
-        _map(twork->work.id, twork->work.split, twork->worker->map,
-            twork->worker->n_reduce);
-        // CALL(TASK_DONE, twork->worker, worker, &resp, 0);
+    if (twork->work.type == MAP
+        && _map(twork->work.id, twork->work.split, twork->worker->map,
+               twork->worker->n_reduce)
+            == SUCCESS) {
+        end_task(twork, &resp);
     }
 
     while (1) {
@@ -209,18 +217,35 @@ void *do_task(void *data)
     return NULL;
 }
 
+void check_ping(worker_t *worker, request_t req)
+{
+    msg_t ping_resp = {
+            .ack = ACK,
+            .type = RESPONSE,
+            .data.req = {
+                .id = req.id,
+                .op = req.op,
+            },
+        };
+    if (sendto(worker->coord_fd, &ping_resp, sizeof(msg_t), 0,
+            worker->coord_info->ai_addr, worker->coord_info->ai_addrlen)
+        == -1) {
+        perror("sendto ping");
+    }
+}
+
 // TODO: better logs + determine if exiting here
 // will recv ping request
-int ping_handler(worker_t *worker)
+int msg_handler(worker_t *worker)
 {
     int ret_recv = 0;
-    msg_t msg_req = { 0 };
+    msg_t msg = { 0 };
 
     while (1) {
         pthread_rwlock_rdlock(&worker->rwlock);
         if (worker->state == COMPLETED) break;
         pthread_rwlock_unlock(&worker->rwlock);
-        if ((ret_recv = recvfrom(worker->coord_fd, &msg_req, sizeof(msg_t), 0,
+        if ((ret_recv = recvfrom(worker->coord_fd, &msg, sizeof(msg_t), 0,
                  worker->coord_info->ai_addr, &worker->coord_info->ai_addrlen))
             == -1) {
             perror("recv ping");
@@ -228,29 +253,33 @@ int ping_handler(worker_t *worker)
             printf("[[COORDINATOR EXIT]]...\n");
             break;
         }
-        if (msg_req.ack != ACK) {
+        msg_type_t msg_type = msg.type;
+        byte msg_id = msg_type == REQUEST ? msg.data.req.id : msg.data.res.id;
+        opcode_t op = msg.data.res.op;
+
+        if (msg.ack != ACK) {
             fprintf(stderr,
-                "could not recognize following request with ID: %d from "
+                "could not recognize following msg with Type: %d, ID: %d from "
                 "%s\n",
-                msg_req.data.req.id, worker->coord_addr);
+                msg_type, msg_id, worker->coord_addr);
             continue;
         }
-        assert(msg_req.data.req.op == PING);
-        printf("<<PING>> received\n");
-        msg_t msg_resp = {
-            .ack = ACK,
-            .type = RESPONSE,
-            .data.req = {
-                .id = msg_req.data.req.id,
-                .op = msg_req.data.req.op,
-            },
-        };
-        if (sendto(worker->coord_fd, &msg_resp, sizeof(msg_t), 0,
-                worker->coord_info->ai_addr, worker->coord_info->ai_addrlen)
-            == -1) {
-            perror("sendto ping");
+        printf("MESSAGE ID: %d\n", msg_id);
+        printf("op %d\n", op);
+        if (msg_type == REQUEST) {
+            assert(msg.data.req.op == PING);
+            printf("<<PING>> received\n");
+            check_ping(worker, msg.data.req);
+        } else {
+            assert(msg.data.res.op == TASK_DONE);
+            printf("<<REQ_TASKDONE SUCCESS>>\n");
+            pthread_rwlock_rdlock(&worker->rwlock);
+            worker->state = COMPLETED;
+            pthread_rwlock_unlock(&worker->rwlock);
+            continue;
         }
     }
+    printf("ending worker...\n");
     return SUCCESS;
 }
 
@@ -289,7 +318,7 @@ int work(worker_t *worker)
     printf("<<REQ_WORK SUCCESS>> type: %d\n", resp.data.task_work.type);
     pthread_t *thread = exec_task_thread(worker, resp.data.task_work);
     if (thread == NULL) return FAILURE;
-    ret_val = ping_handler(worker);
+    ret_val = msg_handler(worker);
     pthread_detach(*thread);
     free(thread);
     return ret_val;

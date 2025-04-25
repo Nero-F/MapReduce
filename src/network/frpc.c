@@ -51,19 +51,28 @@ response_t ask_nreduce(asked_t asked, coordinator_t *coord)
 {
     printf("requesting nreduce...\n");
 
-    response_t resp = {
+    return (response_t) {
         .id = asked.req.id,
         .op = asked.req.op,
         .data = (inner_data_u) {
             .nrduce = coord->n_reduce,
         },
     };
-    return resp;
+}
+response_t task_done(asked_t asked, coordinator_t *coord)
+{
+    printf("worker %d done.\n", asked.req.data.task_work.id);
+
+    return (response_t) {
+        .id = asked.req.id,
+        .op = asked.req.op,
+    };
 }
 
 response_t (*fptr_tbl[])(asked_t asked, coordinator_t *coord) = {
     &ask_work,
     &ask_nreduce,
+    &task_done,
     NULL,
 };
 
@@ -109,8 +118,7 @@ void *work_pinger(void *data)
     return NULL;
 }
 
-int start_ping_thread(
-    pthread_t * thread, int cli_fd, work_t task_work)
+int start_ping_thread(pthread_t *thread, int cli_fd, work_t task_work)
 {
     pinger_data_t *p_data = malloc(sizeof(pinger_data_t));
     pthread_t thrd = { 0 };
