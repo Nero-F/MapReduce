@@ -10,15 +10,11 @@
 typedef enum opcode_e {
   REQ_WORK = 0,
   REQ_NREDUCE,
-  PING, // from coord to worker only
   TASK_DONE,
+  PING, // from coord to worker only
 } opcode_t;
 
 typedef char byte;
-typedef struct request_s {
-  opcode_t op;
-  byte id;
-} __attribute__((packed)) request_t;
 
 typedef struct work_s {
   char split[MAX_FILENAME_LENGTH];
@@ -28,9 +24,15 @@ typedef struct work_s {
 
 typedef union inner_data {
   work_t task_work;
-  char intermediate_result[MAX_FILENAME_LENGTH];
+  // char intermediate_result[MAX_FILENAME_LENGTH];
   int nrduce;
 } __attribute__((packed)) inner_data_u;
+
+typedef struct request_s {
+  inner_data_u data;
+  opcode_t op;
+  byte id;
+} __attribute__((packed)) request_t;
 
 typedef struct response_s {
   inner_data_u data;

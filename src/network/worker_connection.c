@@ -24,12 +24,14 @@ int call(opcode_t op, worker_t *worker, response_t *resp, uint retry)
     struct addrinfo *coord_info = worker->coord_info;
     uint try_nbr = 0;
 
-    msg_t msg = { .ack = ACK,
+    msg_t msg = {
+        .ack = ACK,
         .type = REQUEST,
         .data.req = {
             .id = id++,
             .op = op,
-        } };
+        },
+    };
 
 try_call:
     if (sendto(sockfd, &msg, sizeof(msg_t), 0, coord_info->ai_addr,
