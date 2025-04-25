@@ -118,7 +118,7 @@ static void on_recv_process_msg(msg_t msg, int cli_fd, coordinator_t *coord)
             }
             break;
         case RESPONSE:
-            assert(msg.data.res.op != PING);
+            assert(msg.data.res.op == PING);
             printf("[WORKER:%d][HEARTBEAT] received\n", cli_fd);
     }
 }

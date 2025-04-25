@@ -139,8 +139,10 @@ int save_intermediate_result(const uint id, kva_t kva, const uint n_reduce)
 
     ASSERT_MEM_CTX(intermediate, "Intermediate result writing");
     DEFER({ free(intermediate); });
-    intermediate[n_reduce].items = NULL;
 
+    for (uint i = 0; i < n_reduce; i++) {
+        memset(&intermediate[i], 0, sizeof(kva_t));
+    }
     foreach (kv_t, kv, &kva) {
         int r = hash(kv->key) % n_reduce;
         da_append(&intermediate[r], *kv);
