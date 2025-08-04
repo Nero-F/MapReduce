@@ -52,19 +52,26 @@ typedef struct worker_s {
   map_t *map;
   reduce_t *reduce;
 
-  // coord socket file descriptor
   int coord_fd;
+
+  // epoll related filedesc
+  int epollfd;
+  int timerfd;
+  int evfd; // manual event triggering
 
   int n_reduce;
   task_state_t state;
   struct addrinfo *coord_info;
 
-  pthread_rwlock_t rwlock;
+  pthread_mutex_t mu;
+  pthread_t *work_thread;
+  work_t *work; // shared between threads
 } worker_t;
 
 int load_mr_plugs(const char *, worker_t *);
 int connect_to_coord(worker_t *worker);
 int end_coord(worker_t *worker, char *err_msg);
-int call(opcode_t op, worker_t *worker, response_t *resp, uint retry);
-
+int call(opcode_t op, worker_t *worker, payload_t *resp, uint retry);
+int _send(opcode_t op, worker_t *worker, inner_data_u data, uint retry);
+int _recv(worker_t *worker, payload_t *resp);
 #endif /* WORKER_H_ */

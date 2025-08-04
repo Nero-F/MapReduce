@@ -17,7 +17,18 @@
         }                                                                      \
     } while (0);
 
-int call(opcode_t op, worker_t *worker, response_t *resp, uint retry)
+#define RETRY_SEND(err_msg)                                                    \
+    do {                                                                       \
+        if (try_nbr < retry) {                                                 \
+            try_nbr++;                                                         \
+            goto try_send;                                                     \
+        } else {                                                               \
+            perror(err_msg);                                                   \
+            return FAILURE;                                                    \
+        }                                                                      \
+    } while (0);
+
+int call(opcode_t op, worker_t *worker, payload_t *resp, uint retry)
 {
     static size_t id = 0;
     int sockfd = worker->coord_fd;
@@ -27,10 +38,7 @@ int call(opcode_t op, worker_t *worker, response_t *resp, uint retry)
     msg_t msg = {
         .ack = ACK,
         .type = REQUEST,
-        .data.req = {
-            .id = id++,
-            .op = op,
-        },
+        .payload = { .id = id++, .op = op, .data = resp->data },
     };
 
 try_call:
@@ -43,11 +51,50 @@ try_call:
             &coord_info->ai_addrlen)
         == -1)
         RETRY_CALL("recvfrom");
-    *resp = msg.data.res;
+    *resp = msg.payload;
     return SUCCESS;
 }
 
-// TODO: maybe check resp ACK
+int _send(opcode_t op, worker_t *worker, inner_data_u data, uint retry)
+{
+    static size_t id = 0;
+    int sockfd = worker->coord_fd;
+    struct addrinfo *coord_info = worker->coord_info;
+    uint try_nbr = 0;
+
+    msg_t msg = {
+        .ack = ACK,
+        .type = REQUEST,
+        .payload = { .id = id++, .op = op, .data = data },
+    };
+
+try_send:
+    if (sendto(sockfd, &msg, sizeof(msg_t), 0, coord_info->ai_addr,
+            coord_info->ai_addrlen)
+        == -1)
+        RETRY_SEND("sendto");
+    return SUCCESS;
+}
+
+int _recv(worker_t *worker, payload_t *resp)
+{
+    int sockfd = worker->coord_fd;
+    struct addrinfo *coord_info = worker->coord_info;
+    msg_t msg = { 0 };
+    int ret_recv = 0;
+    if ((ret_recv = recvfrom(sockfd, &msg, sizeof(msg_t), 0,
+             coord_info->ai_addr, &coord_info->ai_addrlen))
+        == -1) {
+        perror("recvfrom");
+        return FAILURE;
+    } else if (ret_recv == 0) {
+        printf("[[COORDINATOR EXIT]]...\n");
+        return TERMINATE;
+    }
+
+    *resp = msg.payload;
+    return SUCCESS;
+}
 
 int connect_to_coord(worker_t *worker)
 {

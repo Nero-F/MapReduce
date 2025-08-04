@@ -28,22 +28,12 @@ typedef union inner_data {
   int nrduce;
 } __attribute__((packed)) inner_data_u;
 
-typedef struct request_s {
+
+typedef struct payload_s {
   inner_data_u data;
   opcode_t op;
   byte id;
-} __attribute__((packed)) request_t;
-
-typedef struct response_s {
-  inner_data_u data;
-  opcode_t op;
-  byte id;
-} __attribute__((packed)) response_t;
-
-typedef union msg_data {
-  request_t req;
-  response_t res;
-} msg_data_u;
+} __attribute__((packed)) payload_t;
 
 typedef enum msg_type_e {
   REQUEST = 0,
@@ -52,15 +42,15 @@ typedef enum msg_type_e {
 
 typedef struct msg_s {
   msg_type_t type;
-  msg_data_u data;
+  payload_t payload;
   byte ack;
 } __attribute__((packed)) msg_t;
 
 typedef struct asked_s {
-  request_t req;
+  payload_t req;
   int cli_fd;
 } asked_t;
 
-int process_req(int, request_t, coordinator_t *);
+int process_req(int, payload_t, coordinator_t *);
 
 #endif /* _F_RPC_H_ */

@@ -6,6 +6,7 @@
 #include <sys/types.h>
 
 #define FAILURE 84
+#define TERMINATE 42 // COORD DISCONNECTION
 #define SUCCESS 0
 
 #define INIT_CAP 256
@@ -45,5 +46,17 @@ typedef struct files_s {
       return FAILURE;                                                          \
     }                                                                          \
   } while (0);
+
+#define LOCK(mutex)                                                            \
+  if (pthread_mutex_lock(mutex) != 0) {                                        \
+    fprintf(stderr, "Could not wrlock resource\n");                            \
+    return FAILURE;                                                            \
+  }
+
+#define UNLOCK(mutex)                                                          \
+  if (pthread_mutex_unlock(mutex) != 0) {                                      \
+    fprintf(stderr, "Could not unlock resource\n");                            \
+    return FAILURE;                                                            \
+  }
 
 #endif /* _COMMON_H_ */
