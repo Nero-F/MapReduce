@@ -4,6 +4,10 @@
 #include "frpc.h"
 #include "mapreduce.h"
 
+#include <sys/cdefs.h>
+#include <sys/epoll.h>
+#include <sys/timerfd.h>
+#include <sys/eventfd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <bits/getopt_core.h>
@@ -62,6 +66,8 @@ int end_coord(worker_t *worker, char *err_msg)
     if (worker->plug_handle) dlclose(worker->plug_handle);
     if (worker->coord_fd != -1) close(worker->coord_fd);
     if (worker->coord_info != NULL) freeaddrinfo(worker->coord_info);
+    if (worker->work_thread != NULL) free(worker->work_thread);
+    pthread_mutex_destroy(&worker->mu);
     return FAILURE;
 }
 
@@ -179,7 +185,6 @@ bool _map(const uint id, const char *filename, map_t *emit, const uint n_reduce)
     buffer[file_size] = '\0';
     read(fd, buffer, file_size);
     kva_t kva = emit(filename, buffer);
-    // TODO: free kva keys
     res = save_intermediate_result(id, kva, n_reduce);
 
     return res;
@@ -190,17 +195,22 @@ typedef struct thread_work_s {
     work_t work;
 } thread_work_t;
 
-int end_task(thread_work_t *twork, response_t *resp)
+int end_task(thread_work_t *twork, payload_t *resp)
 {
-    printf("<<REQ_TASKDONE>>...\n");
-    CALL(TASK_DONE, twork->worker, resp, 3);
+    resp->data.task_work
+        = twork->work; // just a little hack to pass in the work type to msg
+    SEND(TASK_DONE, twork->worker, resp->data, 3);
+
+    LOCK(&twork->worker->mu);
+    twork->worker->state = IDLE;
+    UNLOCK(&twork->worker->mu);
     return SUCCESS;
 }
 
 void *do_task(void *data)
 {
     thread_work_t *twork = (thread_work_t *)data;
-    response_t resp = { 0 };
+    payload_t resp = { 0 };
 
     if (twork->work.type == MAP
         && _map(twork->work.id, twork->work.split, twork->worker->map,
@@ -209,24 +219,19 @@ void *do_task(void *data)
         end_task(twork, &resp);
     }
 
-    while (1) {
-    }
-    // else if (twork->work.type == REDUCE)
-    //     _reduce(twork->work.id, twork->work.split, twork->worker->map);
-
-    return NULL;
+    return SUCCESS;
 }
 
-void check_ping(worker_t *worker, request_t req)
+void check_ping(worker_t *worker, payload_t req)
 {
     msg_t ping_resp = {
             .ack = ACK,
             .type = RESPONSE,
-            .data.req = {
+            .payload = {
                 .id = req.id,
                 .op = req.op,
             },
-        };
+    };
     if (sendto(worker->coord_fd, &ping_resp, sizeof(msg_t), 0,
             worker->coord_info->ai_addr, worker->coord_info->ai_addrlen)
         == -1) {
@@ -234,56 +239,7 @@ void check_ping(worker_t *worker, request_t req)
     }
 }
 
-// TODO: better logs + determine if exiting here
-// will recv ping request
-int msg_handler(worker_t *worker)
-{
-    int ret_recv = 0;
-    msg_t msg = { 0 };
-
-    while (1) {
-        pthread_rwlock_rdlock(&worker->rwlock);
-        if (worker->state == COMPLETED) break;
-        pthread_rwlock_unlock(&worker->rwlock);
-        if ((ret_recv = recvfrom(worker->coord_fd, &msg, sizeof(msg_t), 0,
-                 worker->coord_info->ai_addr, &worker->coord_info->ai_addrlen))
-            == -1) {
-            perror("recv ping");
-        } else if (ret_recv == 0) {
-            printf("[[COORDINATOR EXIT]]...\n");
-            break;
-        }
-        msg_type_t msg_type = msg.type;
-        byte msg_id = msg_type == REQUEST ? msg.data.req.id : msg.data.res.id;
-        opcode_t op = msg.data.res.op;
-
-        if (msg.ack != ACK) {
-            fprintf(stderr,
-                "could not recognize following msg with Type: %d, ID: %d from "
-                "%s\n",
-                msg_type, msg_id, worker->coord_addr);
-            continue;
-        }
-        printf("MESSAGE ID: %d\n", msg_id);
-        printf("op %d\n", op);
-        if (msg_type == REQUEST) {
-            assert(msg.data.req.op == PING);
-            printf("<<PING>> received\n");
-            check_ping(worker, msg.data.req);
-        } else {
-            assert(msg.data.res.op == TASK_DONE);
-            printf("<<REQ_TASKDONE SUCCESS>>\n");
-            pthread_rwlock_rdlock(&worker->rwlock);
-            worker->state = COMPLETED;
-            pthread_rwlock_unlock(&worker->rwlock);
-            continue;
-        }
-    }
-    printf("ending worker...\n");
-    return SUCCESS;
-}
-
-pthread_t *exec_task_thread(worker_t *worker, work_t task_work)
+int exec_task_thread(worker_t *worker, work_t task_work)
 {
     pthread_t *thread = malloc(sizeof(pthread_t));
     ASSERT_MEM_CTX(thread, "Task thread");
@@ -294,50 +250,168 @@ pthread_t *exec_task_thread(worker_t *worker, work_t task_work)
     };
     if (pthread_create(thread, NULL, &do_task, &twork) != 0) {
         perror("pthread_create");
-        return NULL;
+        free(thread);
+        return FAILURE;
     }
-    return thread;
+    worker->work_thread = thread;
+    return SUCCESS;
 }
 
-int work(worker_t *worker)
+int req_nreduce(worker_t *worker)
 {
-    response_t resp = { 0 };
-    int ret_val = SUCCESS;
-
+    payload_t resp = { 0 };
     printf("<<REQ_NREDUCE>>...\n");
     CALL(REQ_NREDUCE, worker, &resp, 2);
     worker->n_reduce = resp.data.nrduce;
     printf("<<REQ_NREDUCE SUCCESS>> value: %d\n", resp.data.nrduce);
+    return SUCCESS;
+}
+
+int req_work(worker_t *worker)
+{
+    printf("[EVENT]: req work..\n");
+    inner_data_u data = { 0 };
+    SEND(REQ_WORK, worker, data, 2);
+    return SUCCESS;
+}
+
+// TODO: on error close fds
+int init_epoll(worker_t *worker)
+{
+    struct epoll_event ev;
+    struct itimerspec timer_spec
+        = { .it_interval = { 10, 0 }, .it_value = { 1, 0 } };
+    int timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+
+    if (timerfd == -1) {
+        perror("timerfd_create");
+        return FAILURE;
+    }
+    if (timerfd_settime(timerfd, 0, &timer_spec, NULL) == -1) {
+        perror("timerfd_settime");
+        return FAILURE;
+    }
+    int epollfd = epoll_create1(EPOLL_CLOEXEC);
+    if (epollfd == -1) {
+        perror("epoll_create1");
+        return FAILURE;
+    }
+    ev.events = EPOLLIN;
+    ev.data.fd = timerfd;
+    epoll_ctl(epollfd, EPOLL_CTL_ADD, timerfd, &ev);
+    ev.data.fd = worker->coord_fd;
+    epoll_ctl(epollfd, EPOLL_CTL_ADD, worker->coord_fd, &ev);
+
+    int evfd = eventfd(0, EFD_NONBLOCK);
+    if (evfd == -1) {
+        perror("eventfd");
+        return FAILURE;
+    }
+    epoll_ctl(epollfd, EPOLL_CTL_ADD, evfd, &ev);
+
+    worker->evfd = evfd;
+    worker->epollfd = epollfd;
+    worker->timerfd = timerfd;
+    return SUCCESS;
+}
+
+int handle_ping(void)
+{
+    printf("[EVENT]: supposed to respond to pong\n");
+    return SUCCESS;
+}
+
+int handle_work(worker_t *worker, payload_t payload)
+{
+    printf("[EVENT]: supposed start work\n");
+
+    LOCK(&worker->mu);
+    worker->state = IN_PROGRESS;
+    UNLOCK(&worker->mu);
+    printf("[WORKER DATA]: %s\n", payload.data.task_work.split);
+
+    return exec_task_thread(worker, payload.data.task_work);
+}
+
+int event_handler(worker_t *worker)
+{
+    payload_t payload = { 0 };
+    int r = _recv(worker, &payload);
+    if (r != SUCCESS) return r;
+
+    switch (payload.op) {
+        case PING:
+            return handle_ping();
+        case REQ_WORK:
+            return handle_work(worker, payload);
+        case TASK_DONE:
+            printf("<<REQ_WORK SUCCESS>>\n");
+            // sending event to epoll timerfd
+            struct itimerspec ntimer_spec
+                = { .it_interval = { 10, 0 }, .it_value = { 1, 0 } };
+            timerfd_settime(worker->timerfd, 0, &ntimer_spec, NULL);
+            break;
+        default:
+            printf("[EVENT]: supposed to respond to shit\n");
+    }
+    return SUCCESS;
+}
+
+int work(worker_t *worker)
+{
+    int ret = SUCCESS;
+    struct epoll_event events[MAX_EVENTS];
+    int nfds = 0;
+
+    if (req_nreduce(worker) != SUCCESS || init_epoll(worker) != SUCCESS)
+        return FAILURE;
 
     while (1) {
-        printf("<<REQ_WORK>>...\n");
-        CALL(REQ_WORK, worker, &resp, 0);
-        if (resp.data.task_work.type != NONE) break;
-        sleep(15);
+        nfds = epoll_wait(worker->epollfd, events, MAX_EVENTS, -1);
+        if (nfds == -1) {
+            perror("epoll_wait");
+            return FAILURE;
+        }
+        for (int n = 0; n < nfds; n++) {
+            // Periodically asking for work when worker is in IDLE state
+            LOCK(&worker->mu);
+            task_state_t _state = worker->state;
+            UNLOCK(&worker->mu);
+            if (events[n].data.fd == worker->timerfd && _state == IDLE) {
+                uint64_t expiration = 0;
+                read(worker->timerfd, &expiration, sizeof(expiration));
+                req_work(worker);
+            }
+            if (events[n].data.fd == worker->coord_fd) {
+                ret = event_handler(worker);
+                if (ret != SUCCESS) return ret;
+            }
+        }
     }
-    printf("<<REQ_WORK SUCCESS>> type: %d\n", resp.data.task_work.type);
-    pthread_t *thread = exec_task_thread(worker, resp.data.task_work);
-    if (thread == NULL) return FAILURE;
-    ret_val = msg_handler(worker);
-    pthread_detach(*thread);
-    free(thread);
-    return ret_val;
+    return SUCCESS;
 }
 
 int main(const int argc, char *const argv[])
 {
+    int ret = SUCCESS;
     worker_t worker = {
         .plug_path = "./plug.so",
         .coord_addr = DEFAULT_COORD_ADDR,
         .coord_port = DEFAULT_COORD_PORT,
-        .state = IDLE,
+        .mu = PTHREAD_MUTEX_INITIALIZER,
     };
+
+    worker.state = IDLE;
+    if (pthread_mutex_init(&worker.mu, NULL) != 0) {
+        fprintf(stderr, "Could not initialise mutex\n");
+        return FAILURE;
+    }
 
     if (parse_arg(argc, argv, &worker) == FAILURE
         || load_mr_plugs(worker.plug_path, &worker) == FAILURE
         || connect_to_coord(&worker) == FAILURE)
         return FAILURE;
-    work(&worker);
+    ret = work(&worker);
     end_coord(&worker, NULL);
-    return SUCCESS;
+    return ret;
 }
