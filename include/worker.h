@@ -27,12 +27,22 @@ PLUGS_MR_LIST
 
 #define CALL(op, worker, resp, try_nbr)                                        \
   do {                                                                         \
-    if (call(op, worker, resp, 0) == FAILURE) {                                \
+    if (call(op, worker, resp, try_nbr) == FAILURE) {                          \
       fprintf(stderr, "could not contact coordinator\n");                      \
       return FAILURE;                                                          \
     }                                                                          \
   } while (0);
 
+#define SEND(op, worker, data, try_nbr)                                        \
+  do {                                                                         \
+    if (_send(op, worker, data, try_nbr) == FAILURE) {                         \
+      fprintf(stderr, "could not contact coordinator\n");                      \
+      return FAILURE;                                                          \
+    }                                                                          \
+                                                                               \
+  } while (0);
+
+// task_state_t state;
 typedef struct worker_s {
   void *plug_handle;
   char *plug_path;
