@@ -112,13 +112,13 @@ static void on_recv_process_msg(msg_t msg, int cli_fd, coordinator_t *coord)
     switch (msg.type) {
         case REQUEST:
             printf("[WORKER:%d][REQ:%d] received with opcode %d\n", cli_fd,
-                msg.data.req.id, msg.data.req.op);
-            if (process_req(cli_fd, msg.data.req, coord) == FAILURE) {
+                msg.payload.id, msg.payload.op);
+            if (process_req(cli_fd, msg.payload, coord) == FAILURE) {
                 fprintf(stderr, "unable to process the request.\n");
             }
             break;
         case RESPONSE:
-            assert(msg.data.res.op == PING);
+            assert(msg.payload.op == PING);
             printf("[WORKER:%d][HEARTBEAT] received\n", cli_fd);
     }
 }
@@ -127,13 +127,12 @@ static int on_recv_worker(network_ctx_t *ctx, void *data, coordinator_t *coord)
 {
     tcp_sock_t *client = (tcp_sock_t *)data;
     int cli_fd = client->fd;
-    printf("[WORKER:%d] received an event...\n", cli_fd);
+    // printf("[WORKER:%d] received an event...\n", cli_fd);
 
     ssize_t msg_len = 0;
     msg_t msg = { 0 };
 
     while ((msg_len = recv(cli_fd, &msg, sizeof(msg_t), 0)) > 0) {
-        printf("ack %d\n", msg.ack);
         // TBD: maybe ignore in this case instead of quitting
         if (msg.ack != ACK) {
             fprintf(stderr, "ACK not valid\n");

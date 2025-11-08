@@ -30,7 +30,7 @@ typedef struct machine_s {
 } machine_t;
 
 typedef struct task_s {
-    pthread_t *thread;
+    pthread_t thread;
     machine_t worker;
     task_type_t type;
     int id;
@@ -49,7 +49,7 @@ typedef struct coordinator_s {
     int running_port;
 
     bool pinger_running;
-    pthread_rwlock_t rwlock;
+    pthread_mutex_t mu;
 } coordinator_t;
 
 // Network stuffs

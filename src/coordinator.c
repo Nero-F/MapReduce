@@ -84,7 +84,7 @@ static llist_t init_tasks(task_type_t type, uint size)
         t->id = i;
         t->worker = m;
         t->type = type;
-        t->thread = NULL;
+        t->thread = 0;
         assert(list_add_elem_at_back(&task_list, t) != false
             && "could not add to tasklist\n");
     }
@@ -105,6 +105,7 @@ int main(const int ac, char *const av[])
     coord.running_port = DEFAULT_RUNNING_PORT;
     coord.n_reduce = DEFAULT_NREDUCE;
     coord.pinger_running = false;
+    pthread_mutex_init(&coord.mu, NULL);
 
     if (parse_arg(ac, av, &coord) == FAILURE)
         ret_val = FAILURE;
@@ -115,6 +116,6 @@ int main(const int ac, char *const av[])
         ret_val = run_server(coord);
     }
     deinint_coord(&coord);
-
+    pthread_mutex_destroy(&coord.mu);
     return ret_val;
 }

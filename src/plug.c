@@ -35,6 +35,10 @@ char *reduce(const char *key, const void *values[])
         ++count;
 
     char *s_count = NULL;
-    asprintf(&s_count, "%ld", count);
+    int ret = asprintf(&s_count, "%ld", count);
+    if (ret == -1) {
+        perror("");
+        return NULL;
+    }
     return s_count;
 }

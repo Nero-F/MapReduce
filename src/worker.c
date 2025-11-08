@@ -88,7 +88,10 @@ int write_result(kva_t *intermediate, int id, int reduce_id)
 {
     char *tmp_filename = NULL;
 
-    asprintf(&tmp_filename, "mr-%d-%d-XXXXXX", id, reduce_id);
+    if (asprintf(&tmp_filename, "mr-%d-%d-XXXXXX", id, reduce_id) == -1) {
+        perror("asprintf");
+        return FAILURE;
+    }
     ASSERT_MEM_CTX(tmp_filename, "Intermediate result writing");
     DEFER({ free(tmp_filename); });
     int tmp_fd = mkstemp(tmp_filename);
@@ -112,7 +115,10 @@ int write_result(kva_t *intermediate, int id, int reduce_id)
     }
 
     char *oname = NULL;
-    asprintf(&oname, "mr-%d-%d", id, reduce_id);
+    if (asprintf(&oname, "mr-%d-%d", id, reduce_id) == -1) {
+        perror("asprintf");
+        return FAILURE;
+    }
     ASSERT_MEM_CTX(oname, "Intermediate result writing");
     DEFER({ free(oname); });
     if (rename(tmp_filename, oname) == -1) {
@@ -183,7 +189,10 @@ bool _map(const uint id, const char *filename, map_t *emit, const uint n_reduce)
     DEFER({ free(buffer); });
 
     buffer[file_size] = '\0';
-    read(fd, buffer, file_size);
+    if (read(fd, buffer, file_size) == -1) {
+        perror("read");
+        return false;
+    }
     kva_t kva = emit(filename, buffer);
     res = save_intermediate_result(id, kva, n_reduce);
 
@@ -379,7 +388,11 @@ int work(worker_t *worker)
             UNLOCK(&worker->mu);
             if (events[n].data.fd == worker->timerfd && _state == IDLE) {
                 uint64_t expiration = 0;
-                read(worker->timerfd, &expiration, sizeof(expiration));
+                int r = read(worker->timerfd, &expiration, sizeof(expiration));
+                if (r == -1) {
+                    perror("work read");
+                    continue;
+                }
                 req_work(worker);
             }
             if (events[n].data.fd == worker->coord_fd) {

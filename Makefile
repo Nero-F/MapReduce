@@ -18,7 +18,7 @@ PLUG 		=	plug
 CFLAGS		=	-W -Wall -Wextra -g -O3 -fshort-enums #-Werror -ldl
 CPPFLAGS	=	-I./include/
 
-LDFLAGS 	= 	-lncurses
+# LDFLAGS 	= 	-lncurses
 
 WORKER		=	worker
 COORDINATOR	=	coordinator
