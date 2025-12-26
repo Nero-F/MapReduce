@@ -17,6 +17,7 @@
     LVL(INFO, BLUE)                                                            \
     LVL(WARNING, YELLOW)                                                       \
     LVL(ERROR, RED)                                                            \
+    LVL(FATAL, MAGENTA)                                                        \
     LVL(CRITICAL, MAGENTA)                                                     \
     LVL(DEBUG, GREEN)
 
@@ -46,7 +47,7 @@ extern f_logger_t g_loggers[];
         else if (lvl != DEBUG) {                                               \
             logger(lvl, format "\n", ##__VA_ARGS__);                           \
         }                                                                      \
-    } while (0);
+    } while (0)
 
 void logger(f_log_lvl, const char *, ...);
 
